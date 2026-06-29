@@ -881,10 +881,7 @@
 
       <div class="activity-row" id="counter-grid"></div>
 
-      <button class="btn btn-green" onclick="saveActivity()" style="width:100%;padding:14px;font-size:15px;margin-bottom:20px;">
-        ✓ Save Activity
-      </button>
-      <div id="save-msg"></div>
+     <div id="save-msg" style="text-align:center;min-height:20px;margin-bottom:20px;"></div>
 
       <!-- Meetings today -->
       <div class="card">
@@ -1629,12 +1626,14 @@ function adjustCount(key, delta) {
   if (delta > 0) names.push('');
   else if (delta < 0 && cur > 0 && names.length) names.pop();
   renderCounters();
+  scheduleAutoSave();
 }
 
 // Typing a name — update data only, no re-render (keeps the field focused).
 function setName(key, i, val) {
   const names = ensureNames(key);
   names[i] = val;
+  scheduleAutoSave();
 }
 
 // × removes just this name slot — the count is NOT reduced.
@@ -1642,15 +1641,32 @@ function rmName(key, i) {
   const names = ensureNames(key);
   names.splice(i, 1);
   renderCounters();
+  scheduleAutoSave();
 }
 
 // Add a name slot without changing the count.
 function addName(key) {
   ensureNames(key).push('');
   renderCounters();
+  scheduleAutoSave();
 }
 
-function saveActivity() {
+// ── Auto-save (fast, debounced) ───────────────────────────────────────
+// Saves ~0.4s after the LAST change — feels instant, and a burst of taps
+// still collapses into ONE write for the whole day (protects the per-doc
+// write limit). It also flushes immediately when the agent leaves the page.
+let _autoSaveTimer = null;
+function scheduleAutoSave() {
+  const el = document.getElementById('save-msg');
+  if (el) el.innerHTML = '<span style="color:#999;font-size:13px;">Saving…</span>';
+  clearTimeout(_autoSaveTimer);
+  _autoSaveTimer = setTimeout(commitActivity, 400);
+}
+
+// Writes the whole day's record in a single operation.
+function commitActivity() {
+  clearTimeout(_autoSaveTimer);
+  _autoSaveTimer = null;
   const data = { ...tempActivity };
   // Trim empty name slots so storage stays clean (count is kept as-is).
   if (data.names) {
@@ -1662,9 +1678,12 @@ function saveActivity() {
     data.names = cleaned;
   }
   saveActivityData(currentUser.id, selectedDate, data);
-  showMsg('save-msg', '✓ Activity saved!', 'success');
-  setTimeout(() => document.getElementById('save-msg').innerHTML = '', 2000);
-}
+  const el = document.getElementById('save-msg');
+  if (el) {
+    el.innerHTML = '<span style="color:var(--green);font-size:13px;">✓ Saved</span>';
+    setTimeout(() => { if (el) el.innerHTML = ''; }, 1500);
+  }
+  }
 
 function onDatePickerChange() {
   const picker = document.getElementById('date-picker');
@@ -2951,6 +2970,11 @@ function initials(name) {
 document.getElementById('meeting-modal').addEventListener('click', function(e) {
   if (e.target === this) closeMeetingModal();
 });
+
+// Save instantly if the agent leaves, backgrounds, or closes the page.
+function flushAutoSave() { if (_autoSaveTimer) commitActivity(); }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushAutoSave(); });
+window.addEventListener('pagehide', flushAutoSave);
 </script>
 </body>
 </html>
